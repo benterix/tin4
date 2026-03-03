@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -49,7 +49,7 @@ class MessageOut(BaseModel):
 
 
 class SendMessageRequest(BaseModel):
-    body: str
+    body: str = Field(..., min_length=1)
 
 
 @router.get("/matches", response_model=list[MatchOut])

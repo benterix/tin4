@@ -14,7 +14,7 @@ services:
 
   # ── Reverse proxy + TLS ──────────────────────────────────────────────────
   traefik:
-    image: traefik:v3.0
+    image: traefik:v2.11
     container_name: tin4_traefik
     restart: unless-stopped
     ports:

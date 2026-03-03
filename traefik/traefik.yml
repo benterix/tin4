@@ -20,14 +20,11 @@ entryPoints:
           permanent: true
   websecure:
     address: ":443"
-    http:
-      tls:
-        certResolver: letsencrypt
 
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: "admin@example.com"
+      email: "admin@tin4app.dev"
       storage: /acme.json
       httpChallenge:
         entryPoint: web
