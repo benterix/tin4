@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TIN4 — Tech Demo</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── Tech Badge Bar ─────────────────────────────────────── -->
+<div id="tech-bar">
+  <span class="badge" id="badge-rest" title="HTTPS REST API">REST</span>
+  <span class="badge" id="badge-ws" title="WebSocket">WS</span>
+  <span class="badge" id="badge-gql" title="GraphQL">GQL</span>
+  <span class="badge" id="badge-rmq" title="RabbitMQ (via swipe)">RMQ</span>
+  <span class="badge" id="badge-rp" title="Redpanda stream">RDPND</span>
+  <span class="badge" id="badge-tcp" title="TCP heartbeat server">TCP</span>
+  <span id="online-count" title="Users online via TCP server">0 online</span>
+</div>
+
+<!-- ── Auth Screen ────────────────────────────────────────── -->
+<div id="auth-screen" class="screen active">
+  <div class="card">
+    <h1>TIN4 <span class="sub">Tech Demo</span></h1>
+    <p class="tagline">Tinder clone · REST · WS · GraphQL · RabbitMQ · Redpanda · TCP</p>
+
+    <div id="auth-tabs">
+      <button class="tab active" onclick="showTab('login')">Login</button>
+      <button class="tab" onclick="showTab('register')">Register</button>
+    </div>
+
+    <!-- Login form -->
+    <form id="login-form" class="auth-form" onsubmit="doLogin(event)">
+      <input type="email" id="login-email" placeholder="Email" required/>
+      <input type="password" id="login-password" placeholder="Password" required/>
+      <button type="submit" class="btn-primary">Login via REST API</button>
+    </form>
+
+    <!-- Register form -->
+    <form id="register-form" class="auth-form hidden" onsubmit="doRegister(event)">
+      <input type="text" id="reg-name" placeholder="Name" required/>
+      <input type="email" id="reg-email" placeholder="Email" required/>
+      <input type="password" id="reg-password" placeholder="Password" required/>
+      <input type="number" id="reg-age" placeholder="Age" min="18" max="99" required/>
+      <textarea id="reg-bio" placeholder="Bio (optional)" rows="2"></textarea>
+      <button type="submit" class="btn-primary">Register via REST API</button>
+    </form>
+
+    <div id="auth-error" class="error hidden"></div>
+  </div>
+</div>
+
+<!-- ── Swipe Screen ───────────────────────────────────────── -->
+<div id="swipe-screen" class="screen">
+  <div class="top-bar">
+    <div class="user-info">
+      <span id="top-user-name">…</span>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="showSection('swipe-section')" id="nav-swipe">Discover</button>
+      <button class="nav-btn" onclick="showSection('matches-section'); loadMatches()" id="nav-matches">Matches</button>
+      <button class="nav-btn" onclick="showSection('gql-section'); loadGraphQL()" id="nav-gql">GraphQL</button>
+    </div>
+    <button class="btn-logout" onclick="logout()">Logout</button>
+  </div>
+
+  <!-- Swipe section -->
+  <div id="swipe-section" class="section active">
+    <div id="card-stack">
+      <div id="no-more" class="hidden">
+        <p>No more profiles!</p>
+        <button class="btn-primary" onclick="loadProfiles()">Refresh (REST)</button>
+      </div>
+    </div>
+    <div id="swipe-btns">
+      <button class="swipe-btn pass" onclick="swipeAction('pass')" id="btn-pass">✗ Pass</button>
+      <button class="swipe-btn like" onclick="swipeAction('like')" id="btn-like">♥ Like</button>
+    </div>
+    <div id="swipe-info" class="info-box">
+      <strong>How it works:</strong> Profiles loaded via <em>REST GET /api/profiles</em>.
+      Swipe publishes to <em>RabbitMQ</em> + <em>Redpanda</em>.
+    </div>
+  </div>
+
+  <!-- Matches section -->
+  <div id="matches-section" class="section hidden">
+    <h2>Your Matches</h2>
+    <div id="matches-list"></div>
+    <div id="chat-panel" class="hidden">
+      <div id="chat-header"></div>
+      <div id="chat-messages"></div>
+      <div id="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Message…" onkeydown="chatKeydown(event)"/>
+        <button class="btn-primary" onclick="sendMessage()">Send (REST)</button>
+      </div>
+    </div>
+    <div class="info-box">
+      Matches loaded via <em>REST GET /api/matches</em>.
+      Chat via <em>REST POST</em> + <em>WebSocket</em> push.
+    </div>
+  </div>
+
+  <!-- GraphQL section -->
+  <div id="gql-section" class="section hidden">
+    <h2>GraphQL Explorer</h2>
+    <div id="gql-queries">
+      <button class="btn-secondary" onclick="gqlProfiles()">profiles(limit:5)</button>
+      <button class="btn-secondary" onclick="gqlMatches()">myMatches</button>
+      <button class="btn-secondary" onclick="gqlStats()">stats</button>
+    </div>
+    <pre id="gql-result" class="code-block">// Click a query above…</pre>
+    <div class="info-box">
+      All queries go to <em>POST /graphql</em> (Strawberry + FastAPI).
+    </div>
+  </div>
+</div>
+
+<!-- ── Match Popup ─────────────────────────────────────────── -->
+<div id="match-popup" class="popup hidden">
+  <div class="popup-inner">
+    <div class="popup-heart">💘</div>
+    <h2>It's a Match!</h2>
+    <img id="popup-photo" src="" alt="match"/>
+    <p id="popup-name"></p>
+    <p class="popup-sub">Notified via <strong>WebSocket</strong> ← Redis pub/sub ← RabbitMQ consumer</p>
+    <button class="btn-primary" onclick="closePopup()">Say hi!</button>
+  </div>
+</div>
+
+<!-- ── Tech Info Panel (bottom) ────────────────────────────── -->
+<div id="tech-log">
+  <div id="tech-log-entries"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

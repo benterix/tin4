@@ -1,0 +1,230 @@
+version: "3.9"
+
+networks:
+  tin4_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  redpanda_data:
+
+services:
+
+  # ── Reverse proxy + TLS ──────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    container_name: tin4_traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8088:8080"   # dashboard (8080 taken on host)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json
+    networks:
+      - tin4_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${DOMAIN}`) && PathPrefix(`/traefik`)"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.middlewares=traefik-strip"
+      - "traefik.http.middlewares.traefik-strip.stripprefix.prefixes=/traefik"
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: tin4_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - tin4_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tin4_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - tin4_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── RabbitMQ ─────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: tin4_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      # Set disk free limit to 100MB to avoid blocking on low-disk servers
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit disk_free_limit 104857600"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - tin4_net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ── Redpanda (Kafka-compatible) ───────────────────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v24.1.1
+    container_name: tin4_redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=512M
+      - --overprovisioned
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    networks:
+      - tin4_net
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info", "--brokers=localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  # ── Main API (FastAPI: REST + WebSocket + GraphQL) ────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: tin4_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      REDPANDA_BROKERS: ${REDPANDA_BROKERS}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES}
+      DOMAIN: ${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    networks:
+      - tin4_net
+    labels:
+      - "traefik.enable=true"
+      # API, GraphQL, WebSocket routes (higher priority)
+      - "traefik.http.routers.api.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/graphql`) || PathPrefix(`/ws`) || PathPrefix(`/health`))"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api.priority=10"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+
+  # ── TCP Presence Server ───────────────────────────────────────────────────
+  tcp-server:
+    build:
+      context: ./tcp-server
+      dockerfile: Dockerfile
+    container_name: tin4_tcp
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      TCP_SERVER_PORT: ${TCP_SERVER_PORT}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tin4_net
+
+  # ── Match Processor (RabbitMQ consumer) ──────────────────────────────────
+  match-processor:
+    build:
+      context: ./match-processor
+      dockerfile: Dockerfile
+    container_name: tin4_match_processor
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      REDPANDA_BROKERS: ${REDPANDA_BROKERS}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    networks:
+      - tin4_net
+
+  # ── Activity Logger (Redpanda consumer) ──────────────────────────────────
+  activity-logger:
+    build:
+      context: ./activity-logger
+      dockerfile: Dockerfile
+    container_name: tin4_activity_logger
+    restart: unless-stopped
+    environment:
+      REDPANDA_BROKERS: ${REDPANDA_BROKERS}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - tin4_net
+
+  # ── Frontend (nginx) ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tin4_frontend
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    networks:
+      - tin4_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
