@@ -1,0 +1,32 @@
+# TIN4 Test User Credentials
+# App: https://37.27.16.14.nip.io
+# All seeded users share password: demo1234
+
+# ── Seeded demo profiles (AI-generated photos via ImageRouter) ──────────
+alice@tin4.demo       demo1234   Alice    26  Coffee addict & hiker
+bob@tin4.demo         demo1234   Bob      29  Software engineer by day, chef by night
+carol@tin4.demo       demo1234   Carol    24  Yoga instructor who loves jazz
+dave@tin4.demo        demo1234   Dave     31  Marathon runner
+eve@tin4.demo         demo1234   Eve      27  Data scientist & amateur astronomer
+frank@tin4.demo       demo1234   Frank    33  Architect
+grace@tin4.demo       demo1234   Grace    25  Bookworm & travel enthusiast
+hank@tin4.demo        demo1234   Hank     30  Guitarist in a band, dog dad
+iris@tin4.demo        demo1234   Iris     23  Marine biologist
+jack@tin4.demo        demo1234   Jack     28  Startup founder
+kara@tin4.demo        demo1234   Kara     26  Pastry chef & cyclist
+leo@tin4.demo         demo1234   Leo      32  History teacher
+maya@tin4.demo        demo1234   Maya     24  UX designer
+nick@tin4.demo        demo1234   Nick     35  Sailor
+olivia@tin4.demo      demo1234   Olivia   27  Nurse + weekend DJ
+paul@tin4.demo        demo1234   Paul     29  Photographer
+quinn@tin4.demo       demo1234   Quinn    22  CS student
+rachel@tin4.demo      demo1234   Rachel   30  Lawyer who does improv comedy
+sam@tin4.demo         demo1234   Sam      28  DevOps engineer
+tina@tin4.demo        demo1234   Tina     25  Biologist turned ML researcher
+
+# ── Notes ───────────────────────────────────────────────────────────────
+# Profile photos: AI-generated via ImageRouter (asiryan/Realistic-Vision)
+# Cost: $0.0127 for 20 images ($0.0006–$0.0013 each)
+# To log in via TCP presence server (port 9000):
+#   python3 tcp-server/client.py --host 37.27.16.14.nip.io --port 9000 --token <JWT>
+#   (obtain JWT from POST /api/auth/login)

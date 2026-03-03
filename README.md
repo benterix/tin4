@@ -4,6 +4,8 @@ A **proof-of-concept** Tinder-like app designed to demonstrate a wide range of m
 
 **Every major feature is intentionally wired to a specific technology** to make the educational mapping crystal-clear.
 
+**Live demo:** https://37.27.16.14.nip.io (Let's Encrypt TLS)
+
 ---
 
 ## Technology → Feature Map
@@ -15,7 +17,7 @@ A **proof-of-concept** Tinder-like app designed to demonstrate a wide range of m
 | **GraphQL** (Strawberry) | Flexible profile queries, match exploration, user stats |
 | **RabbitMQ** | Async swipe processing → match detection (work-queue pattern) |
 | **Redpanda** (Kafka) | Event streaming: swipes, matches, activity audit log |
-| **TCP Socket Server** | Presence/heartbeat service — raw asyncio sockets |
+| **TCP Socket Server** | Presence/heartbeat service — raw asyncio sockets on port 9000 |
 
 ---
 
@@ -26,29 +28,28 @@ Browser
   │
   │  HTTPS/WSS
   ▼
-Traefik (TLS + reverse proxy)
+Traefik v2.11 (TLS + reverse proxy)
   │
-  ├──/api/*  ──────────────────► FastAPI (api)
+  ├──/api/*  ──────────────────► FastAPI (api:8000)
   │                                │  REST routers
   │                                │  WebSocket (/ws)
   │                                │  GraphQL (/graphql)
-  │                                │
-  ├──/graphql ────────────────────►│
-  │                                │
-  └──/ws ─────────────────────────►│
-                                   │
+  │
+  └──/  ───────────────────────► nginx (frontend:80)
+                                   └── proxies /api /graphql /ws → api
+
                           ┌────────┴────────┐
                           │                 │
                        RabbitMQ          Redpanda
                           │                 │
                     Match Processor    Activity Logger
-                          │                 │
-                       Redis ◄─────────────►│
                           │
-                     WebSocket push (match notifications)
+                       Redis pub/sub
+                          │
+                     WebSocket push → Browser ("💘 It's a match!")
 
-TCP :9000 ◄── raw socket heartbeat ── demo client / tcp-server/client.py
-         └──► Redis presence keys (read by REST /api/profiles)
+TCP :9000 ◄── raw socket heartbeat ── tcp-server/client.py
+         └──► Redis presence keys (TTL 30s, read by /api/profiles)
 ```
 
 ---
@@ -56,14 +57,14 @@ TCP :9000 ◄── raw socket heartbeat ── demo client / tcp-server/client.
 ## Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- Domain `37.27.16.14.nip.io` pointing to your server (or `localhost` for local testing)
+- Docker Engine 24+ and Docker Compose
+- A public domain / nip.io address for Let's Encrypt (or use `localhost` for local testing)
 
 ### 1. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env — set ACME_EMAIL for Let's Encrypt, change JWT_SECRET
+# Set DOMAIN, ACME_EMAIL (must be a real domain, not example.com), JWT_SECRET
 ```
 
 ### 2. Start the stack
@@ -72,7 +73,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-First startup takes ~2 minutes for Redpanda to be ready.
+First startup takes ~2 minutes for Redpanda to be ready. All 10 services should reach healthy status.
 
 ### 3. Seed demo profiles
 
@@ -80,23 +81,44 @@ First startup takes ~2 minutes for Redpanda to be ready.
 docker compose exec api python /app/seed.py
 ```
 
-> Or copy `scripts/seed.py` into `api/seed.py` and run it. Seeds 20 fake profiles (password: `demo1234`).
+Seeds 20 profiles with AI-generated photos (see below). Password for all: `demo1234`.
 
 ### 4. Open the app
 
-- **Frontend:** https://37.27.16.14.nip.io
-- **API docs:** https://37.27.16.14.nip.io/api/docs
-- **GraphQL:** https://37.27.16.14.nip.io/graphql
-- **Traefik dashboard:** http://localhost:8088
+| URL | Description |
+|---|---|
+| https://37.27.16.14.nip.io | Frontend SPA |
+| https://37.27.16.14.nip.io/api/docs | FastAPI Swagger UI |
+| https://37.27.16.14.nip.io/graphql | GraphQL playground |
+| http://localhost:8088 | Traefik dashboard |
+| http://localhost:8081 | Frontend (direct, bypasses Traefik) |
+| http://localhost:8000/docs | API (direct, bypasses Traefik) |
+
+---
+
+## Test Users
+
+See `testusers.txt` for full list. All share password `demo1234`:
+
+| Email | Name | Age | Bio |
+|---|---|---|---|
+| alice@tin4.demo | Alice | 26 | Coffee addict & hiker |
+| bob@tin4.demo | Bob | 29 | Software engineer by day, chef by night |
+| carol@tin4.demo | Carol | 24 | Yoga instructor who loves jazz |
+| dave@tin4.demo | Dave | 31 | Marathon runner |
+| eve@tin4.demo | Eve | 27 | Data scientist & amateur astronomer |
+| ... | (16 more in testusers.txt) | | |
+
+Profile photos are **AI-generated** via [ImageRouter](https://imagerouter.io) using `asiryan/Realistic-Vision` model — 20 images for $0.013 total.
 
 ---
 
 ## Demo TCP Client
 
-The browser can't make raw TCP connections. Use the demo CLI client:
+The browser can't make raw TCP connections. Use the CLI client:
 
 ```bash
-# Get a token first (login via API)
+# Get a JWT first
 TOKEN=$(curl -s -X POST https://37.27.16.14.nip.io/api/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@tin4.demo","password":"demo1234"}' | jq -r .access_token)
@@ -116,14 +138,10 @@ python tcp-server/client.py --host 37.27.16.14.nip.io --port 9000 --token $TOKEN
 | POST | `/api/auth/login` | Login, get JWT |
 | GET | `/api/auth/me` | Get current user |
 
-### Profiles
+### Profiles & Swipe
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/profiles` | Get unswipped profiles |
-
-### Swipe
-| Method | Path | Description |
-|---|---|---|
+| GET | `/api/profiles?limit=N` | Browse unswiped profiles |
 | POST | `/api/swipe` | `{target_id, direction: "like"\|"pass"}` |
 
 ### Matches & Chat
@@ -131,7 +149,7 @@ python tcp-server/client.py --host 37.27.16.14.nip.io --port 9000 --token $TOKEN
 |---|---|---|
 | GET | `/api/matches` | List all matches |
 | GET | `/api/matches/{id}/messages` | Chat history |
-| POST | `/api/matches/{id}/messages` | Send message |
+| POST | `/api/matches/{id}/messages` | Send message (body min 1 char) |
 
 ### GraphQL
 ```graphql
@@ -141,11 +159,11 @@ python tcp-server/client.py --host 37.27.16.14.nip.io --port 9000 --token $TOKEN
 ```
 
 ### WebSocket
-Connect to `wss://<domain>/ws?token=<jwt>`.
+Connect: `wss://<domain>/ws?token=<jwt>`
 
-Messages received:
+Events received:
 ```json
-{"type": "match", "data": {"match_id": "...", "other_user": {...}}}
+{"type": "match",   "data": {"match_id": "...", "other_user": {...}}}
 {"type": "message", "data": {"match_id": "...", "message": {...}}}
 ```
 
@@ -154,82 +172,77 @@ Messages received:
 ## Data Flow: Swipe → Match → Notification
 
 ```
-User swipes right
-      │
-      ▼
-POST /api/swipe (REST)
-      │
-      ├──► PostgreSQL (write swipe record)
-      ├──► RabbitMQ   queue: swipe_events
-      └──► Redpanda   topic: swipe_stream
+POST /api/swipe
+  ├─► PostgreSQL      write swipe record
+  ├─► RabbitMQ        queue: swipe_events  (fire-and-forget)
+  └─► Redpanda        topic: swipe_stream  (fire-and-forget)
 
 match-processor (RabbitMQ consumer):
-      │  consumes swipe_events
-      │  checks for mutual like in DB
-      │  if match found:
-      ├──► PostgreSQL  (write match record)
-      ├──► Redis pub/sub channel: ws_events
-      └──► Redpanda   topic: match_events
+  reads swipe_events → checks mutual like in DB
+  if match:
+    ├─► PostgreSQL    write match record
+    ├─► Redis pub/sub channel: ws_events
+    └─► Redpanda      topic: match_events
 
-API (Redis pub/sub subscriber):
-      │  receives ws_events message
-      └──► WebSocket push → Browser
-                  "💘 It's a match!"
+API WS manager (Redis subscriber):
+  receives ws_events → pushes to connected WebSocket client
 
 activity-logger (Redpanda consumer):
-      Logs all events from swipe_stream, match_events, user_activity
+  logs swipe_stream + match_events + user_activity
 ```
 
 ---
 
 ## Running Tests
 
-### Unit & Integration Tests
+### Unit Tests (no Docker needed — uses SQLite + mocks)
 
 ```bash
-cd tests
-pip install -r requirements-test.txt
-pip install aiosqlite  # for SQLite test DB
-
-# API tests (no Docker needed, uses SQLite + mocks)
-pytest test_auth.py test_swipe.py test_graphql.py -v
-
-# TCP server tests
-pytest test_tcp_server.py -v
+pip install -r tests/requirements-test.txt pydantic-settings aio-pika aiokafka asyncpg
+pytest tests/ --ignore=tests/playwright -v
+# 24 tests, all passing
 ```
 
-### Playwright E2E Tests (requires full stack running)
+### Playwright E2E (requires full stack)
 
 ```bash
 playwright install chromium
-pytest tests/playwright/test_e2e.py --base-url http://localhost -v
+pytest tests/playwright/test_e2e.py --base-url http://localhost:8081 -v
+# 12 tests, all passing
+```
+
+### Scenario Tests (against live HTTPS stack)
+
+```bash
+python3 scripts/scenario_test.py https://37.27.16.14.nip.io
+# 44 checks across 16 user scenarios, all passing
 ```
 
 ---
 
 ## Services
 
-| Service | Container | Port |
+| Container | Role | Exposed port |
 |---|---|---|
-| Traefik | tin4_traefik | 80, 443, 8088(dashboard) |
-| FastAPI | tin4_api | 8000 (internal) |
-| TCP Server | tin4_tcp | 9000 |
-| Match Processor | tin4_match_processor | — |
-| Activity Logger | tin4_activity_logger | — |
-| Frontend (nginx) | tin4_frontend | 80 (internal) |
-| RabbitMQ | tin4_rabbitmq | 5672, 15672 (internal) |
-| Redpanda | tin4_redpanda | 9092 (internal) |
-| PostgreSQL | tin4_postgres | 5432 (internal) |
-| Redis | tin4_redis | 6379 (internal) |
+| tin4_traefik | Reverse proxy + TLS | 80, 443, 8088 (dashboard) |
+| tin4_api | FastAPI — REST + WS + GraphQL | 8000 |
+| tin4_tcp | TCP presence server | 9000 |
+| tin4_frontend | nginx SPA + API proxy | 8081 |
+| tin4_match_processor | RabbitMQ consumer | — |
+| tin4_activity_logger | Redpanda consumer | — |
+| tin4_rabbitmq | Message broker | internal |
+| tin4_redpanda | Kafka-compatible event log | internal |
+| tin4_postgres | Primary database | internal |
+| tin4_redis | Cache + pub/sub | internal |
 
 ---
 
-## Educational Notes
+## Key Design Decisions
 
-- **TCP vs WebSocket**: The TCP server is intentionally low-level (raw `asyncio` streams) to contrast with the higher-level WebSocket abstraction.
-- **RabbitMQ vs Redpanda**: RabbitMQ models **work-queue** (each message processed exactly once). Redpanda models **event log** (durable, replayable from offset 0).
-- **REST vs GraphQL**: REST is resource-oriented and predictable. GraphQL allows the client to specify exactly what data it needs in a single request.
-- **WebSocket relay**: Match notifications flow through `match-processor → Redis pub/sub → API WebSocket manager → browser`, demonstrating event-driven architecture across multiple services.
+- **Traefik v2.11** (not v3): Docker Engine 27+ dropped support for Docker API < 1.44 which Traefik v3.0's embedded client used, breaking Docker label routing entirely.
+- **Fire-and-forget publishes**: Swipe endpoint uses `asyncio.create_task()` for RabbitMQ/Redpanda publishes so HTTP responses never block on broker availability.
+- **UUID columns in match-processor**: Must use `Column(UUID(as_uuid=False))` not `Column(String)` — asyncpg is strict about type coercion.
+- **Redis pub/sub relay**: Multi-instance WebSocket support: any API instance can deliver a notification to any connected user.
 
 ---
 
@@ -247,4 +260,4 @@ pytest tests/playwright/test_e2e.py --base-url http://localhost -v
 | Redpanda | 24.1 |
 | PostgreSQL | 16 |
 | Redis | 7 |
-| Traefik | v3.0 |
+| Traefik | v2.11 |
