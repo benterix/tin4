@@ -25,8 +25,8 @@ sam@tin4.demo         demo1234   Sam      28  DevOps engineer
 tina@tin4.demo        demo1234   Tina     25  Biologist turned ML researcher
 
 # ── Notes ───────────────────────────────────────────────────────────────
-# Profile photos: AI-generated via ImageRouter (asiryan/Realistic-Vision)
-# Cost: $0.0127 for 20 images ($0.0006–$0.0013 each)
+# Profile photos: AI-generated via ImageRouter (black-forest-labs/FLUX-2-max, 1024x1024)
+# Cost: $1.40 for 20 images ($0.07 each) — prompts tailored to each user's bio
 # To log in via TCP presence server (port 9000):
 #   python3 tcp-server/client.py --host 37.27.16.14.nip.io --port 9000 --token <JWT>
 #   (obtain JWT from POST /api/auth/login)

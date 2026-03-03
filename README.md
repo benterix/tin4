@@ -109,7 +109,7 @@ See `testusers.txt` for full list. All share password `demo1234`:
 | eve@tin4.demo | Eve | 27 | Data scientist & amateur astronomer |
 | ... | (16 more in testusers.txt) | | |
 
-Profile photos are **AI-generated** via [ImageRouter](https://imagerouter.io) using `asiryan/Realistic-Vision` model — 20 images for $0.013 total.
+Profile photos are **AI-generated** via [ImageRouter](https://imagerouter.io) using `black-forest-labs/FLUX-2-max` (SOTA quality, 1024×1024) — 20 images for $1.40 total. Each prompt is tailored to the user's bio/occupation.
 
 ---
 
